@@ -62,8 +62,8 @@ k=0
 (array([0., 0., 0., 1., 0., 0.]), {1, 2, 3})
 ```
 
-To summarize, it does the following:
-* constructs an ISL set based on the input string
+To summarize, the `face_lattice(s)` function does the following:
+* constructs an ISL set based on the input string `s`
 * extracts the constraints matrix `C_hat` from ISL
 * passes the constraints matrix to PolyLib to produce the rays/verticies representation `R_hat`. Each column in `R_hat` represents a ray or vertex with the last row indicating which one it is (0 for rays, 1 for verticies). In this example, there are 3 rays and 3 verticies.
 * constructs the incidence matrix from `C_hat` and `R_hat`
@@ -77,10 +77,6 @@ k=2
 (array([0., 1., 1., 1., 0., 1.]), {2})
 (array([0., 0., 0., 1., 1., 1.]), {3})
 ```
-[[0 0 1 3 0 0]
- [0 1 0 0 0 3]
- [1 1 1 3 3 3]
- [0 0 0 1 1 1]]
 
 The first reported 2-face is described by the 0th, 1st, 4th, and 5th columns in `R_hat`, i.e., at the points/vectors (i,j,N):
 * (0,0,1)
