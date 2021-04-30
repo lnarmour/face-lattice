@@ -161,11 +161,11 @@ def face_lattice(s):
     F = initialize_facets(C)
     V = np.ones(I.shape[1]) # all inequalities at first
 
-    #print('Dimension:\n{}\n'.format(dim_P))
+    print('Dimension:\n{}\n'.format(dim_P))
     #print('k-faces:')
 
     # find all k-faces of P
-    lattice = {dim_P: [frozenset()]}
+    lattice = {dim_P: [{}]}
     ks = list(range(dim_P-1, -1, -1))
     for k in ks:
         #print('k={}'.format(k))
@@ -173,13 +173,13 @@ def face_lattice(s):
         ScanFaces(k=k, i=0, needed=dim_P-k, F=F, V=V, I=I, faces=faces)
         lattice[k] = faces #[frozenset(f) for f in faces]
         #print()
-    for k in ks:
+    for k in [dim_P] + ks:
         print('{}-faces: {}'.format(k, lattice[k])) # [set(fs) for fs in lattice[k]]))
     print()
 
     fl = FaceLattice(lattice)
 
-    return C_hat, fl, bset, dim_P
+    return C_hat[:-1,:], fl, bset, dim_P
 
 
 class FaceLattice:
