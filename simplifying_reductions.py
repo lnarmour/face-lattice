@@ -87,12 +87,47 @@ def rho_from_labels(faces, C, labels, fd):
 
     feasible_rho = result - origin
 
-    return feasible_rho
+    if feasible_rho.is_empty():
+        return None
+
+    rho = list()
+    # either lexmin or lexmax
+    funcs = [feasible_rho.lexmin, feasible_rho.lexmax]
+    for func in funcs:
+        try:
+            func().foreach_point(rho.append)
+        except Exception:
+            continue
+        finally:
+            if rho:
+                break
+
+    return rho[0]
 
 
-def recursive_simplify(k=None, op=None, fp=None, fd=None, node=None, lattice=None, C=None):
+def recursive_simplify(k=None, op=None, fp_str=None, fd_str=None, node=None, lattice=None, C=None):
+    fp = BasicMap(fp_str)
+    fd = BasicMap(fd_str)
 
-    print('STEP 3 - for each child face of the current node, label as "weak" or "strict"\n')
+    print('STEP 3.0 - begin recursive call with:\n')
+
+    print('node = {}'.format('{}'))
+    print('fp = {}'.format(fp_str))
+    print('fd = {}'.format(fd_str))
+    print()
+
+    print('STEP 3.1 - factorize fp = fp1 * fp2')
+    print('           fp2 dictates which boundaries are strict or weak')
+    print('           for now, let fp1 = identity and fp2 = fp')
+    print('           (TODO)\n')
+
+    indices = ','.join([k for k in fp.get_space().get_var_dict()])
+
+    print('fp1 = {{[{}]->[{}]}}'.format(indices, indices))
+    print('fp2 = {}'.format(fp_str))
+    print()
+
+    print('STEP 3.2 - for each child face in node, label as "weak" or "strict" given fp2\n')
     faces = list(lattice.graph.neighbors(node))
     for face in faces:
         face = set(face)
@@ -100,70 +135,45 @@ def recursive_simplify(k=None, op=None, fp=None, fd=None, node=None, lattice=Non
         print(face, label)
     print()
 
-    # ignore strict faces
+    print('STEP 3.3 - determine the possible face labelings given op\n')
+    legal_labels = ['ADD', 'INV']
+    if inverse(op):
+        legal_labels.append('SUB')
+
+    print('op = {}'.format(op))
+    print('labels = {}'.format(legal_labels))
+    print()
+
+    print('STEP 3.4 - enumerate all label combos from labels and "weak" faces\n')
     candidate_faces = [face for face in faces if not is_strict(face, fp, C)]
 
-    print('STEP 4 - determine the feasible space of legal reuse vectors\n')
-    #   - if the operator admits an inverse, then this is given by the kernel of fd
-    #   - else, construct the feasible reuse space s.t. no subtraction faces can be induced
-    # this is a set of inequalities, all non-boundary faces must be INV or ADD (i.e., rho dot c >= 0)
-    if inverse(op):
-        legal_labels = ['ADD', 'SUB', 'INV']
-    else:
-        legal_labels = ['ADD', 'INV']
+    print('STEP 3.5 - prune out impossible combos & for each possible combo:')
+    print('             - construct space of legal reuse vectors rho')
+    print('             - if this is not empty then use lexmin/lexmax to select a rho')
+    print('           if no possible combo results in success then report failure')
+    print('           apply Theorem 5 to set up residual reductions and recurse\n')
 
-    print('STEP 5 - construct set of all possible label combos & corresponding rho\n')
-
-    num_faces = len(candidate_faces)
     label_combos = list()
-    num_labels = len(legal_labels)
-    for i in range(num_labels ** len(candidate_faces)):
-        labels = [LABEL[int(d_ary(num_labels, i).zfill(num_faces)[j])] for j in range(num_faces)]
-        feasible_rho = rho_from_labels(candidate_faces, C, labels, fd)
-        if feasible_rho.is_empty():
-            print(labels)
-            continue
-        rho = list()
+    for i in range(len(legal_labels) ** len(candidate_faces)):
+        labels = [LABEL[int(d_ary(len(legal_labels), i).zfill(len(candidate_faces))[j])] for j in range(len(candidate_faces))]
+        rho = rho_from_labels(candidate_faces, C, labels, fd)
+        if rho:
+            label_combos.append(labels + [rho])
 
-        # either lexmin or lexmax
-        funcs = [feasible_rho.lexmin, feasible_rho.lexmax]
-        for func in funcs:
-            try:
-                func().foreach_point(rho.append)
-            except Exception:
-                continue
-            finally:
-                if rho:
-                    break
-
-        rho = rho[0]
-        print('{}  possible ->   rho = {}'.format(labels, rho))
-        label_combos.append(labels + [rho])
+    if label_combos:
+        header = ['{}'.format(set(f)) for f in candidate_faces]
+        print(header)
+        print('-'*len(str(header)))
+        for combo in label_combos:
+            labels, rho = combo[:-1], combo[-1]
+            print('{}  possible ->   rho = {}'.format(labels, rho))
+    else:
+        print('Failed - no possible remaining options')
     print()
 
-    print('STEP 6 - remove redundant combinations\n')
-    for combo in label_combos:
-        print('{}  possible ->   rho = {}'.format(combo[:-1], combo[-1]))
-    print()
-    # 1 'ADD', 'ADD', 'INV'  <-- recursive calls to the first ADD, then the second ADD are successful
-    # 2 'INV', 'INV', 'ADD'
-
-    # STEP 7 - for a given combo, recurse into each ADD face
-    #   each recursive call must return a successful simplification
-    #   need some "global" data structure (i.e. a table at each node to keep track of which paths have already been explored)
-
-    # double check this
-    # STEP 7.5, before each recursive call, do decomposition to construct new alphaz expression
-    #   construct new projection function
-    #   unroll constant dims, domain must have equalities
 
 
 
-
-
-
-
-    # select minimal possible ones
 
 
 
@@ -172,40 +182,48 @@ def recursive_simplify(k=None, op=None, fp=None, fd=None, node=None, lattice=Non
 def simplify(op=None, fp=None, s=None, fd=None):
     print('-'*80)
 
-    print('STEP 1 - construct the face lattice\n')
+    print('STEP 1 - construct the face lattice from context domain of reduction body\n')
     C, lattice, bset, dim_P = face_lattice(s)
-    print()
 
     print('STEP 2 - get the root node in lattice and start recursion\n')
     root = lattice.get_root()
-    print('node = {}'.format('{}'))
-    print('fp = {}'.format(fp))
-    print('fd = {}'.format(fd))
-    print()
 
     # todo add counter for num remaining dims of reuse available
     # not necessarily a need to decompose the dependence function
 
-    recursive_simplify(k=dim_P, op=op, fp=BasicMap(fp), fd=BasicMap(fd), node=root, lattice=lattice, C=C)
+    recursive_simplify(k=dim_P, op=op, fp_str=fp, fd_str=fd, node=root, lattice=lattice, C=C)
 
 
-def main():
-
+def ex1():
     # ex1
     simplify(op='max',
              fp='{[i,j,k]->[i]}',
               s='{[i,j,k] : 1<=i<=100 and 1<=j<=i-1 and 1<=k<=i-j }',
              fd='{[i,j,k]->[k]}')
 
-    # ex2
-    simplify(op='+',
+
+def ex2():
+    # ex2 - needs reduction decomposition of fp first
+    simplify(op='max',
              fp='{[i,j,k]->[i]}',
              s='{[i,j,k] : k>=1 and 0>=i+k-100 and j>=1 and i>=j and 0>=k-100 and 0>=j-100 and i>=1 and 0>=i-99}',
              fd='{[i,j,k]->[j,k]}')
 
 
+def ex3():
+    # ex3 - needs reduction decomposition with not-so-obvious factorization of fp
+    simplify(op='+',
+             #fp='{[i,j,k]->[i,j+k]}',
+             fp='{[i,j,k]->[i]}',
+             s='{[i,j,k] : j>=i and 2i>=j and k>=i and 3i>=j+k and j>=1 and k>=1 and 0>=j-100 and 0>=k-100 and 0>=i-100 and i>=1}',
+             fd='{[i,j,k]->[j,k]}')
+
+
+
 if __name__ == '__main__':
-    main()
+    #ex1()
+    #ex2()
+    ex3()
 
 
 
