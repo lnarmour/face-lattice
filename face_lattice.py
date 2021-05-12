@@ -185,7 +185,7 @@ def face_lattice(s):
 class FaceLattice:
 
     def __init__(self, lattice):
-        self.graph = nx.Graph()
+        self.graph = nx.DiGraph()
 
         Ks = [k for k in lattice]
         root = frozenset(lattice[Ks[0]][0])

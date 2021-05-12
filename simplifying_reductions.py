@@ -5,6 +5,22 @@ from itertools import combinations
 from functools import reduce
 
 
+def ex1():
+    # ex1
+    simplify(op='max',
+             fp='{[i,j,k]->[i]}',
+              s='{[i,j,k] : 1<=i<=100 and 1<=j<=i-1 and 1<=k<=i-j }',
+             fd='{[i,j,k]->[k]}')
+
+
+def ex3():
+    # ex3 - needs reduction decomposition with not-so-obvious factorization of fp
+    simplify(op='max',
+             #fp='{[i,j,k]->[i,j+k]}',
+             fp='{[i,j,k]->[i]}',
+             s='{[i,j,k] : j>=i and 2i>=j and k>=i and 3i>=j+k and j>=1 and k>=1 and 0>=j-100 and 0>=k-100 and 0>=i-100 and i>=1}',
+             fd='{[i,j,k]->[j,k]}')
+
 
 def inverse(op):
     store = {
@@ -34,6 +50,25 @@ def mat_to_set(mat, condition='='):
     constraints = []
     for c in mat:
         constraints.append('+'.join(['{}{}'.format(a[0],a[1]) for a in zip(c, indices.split(','))]) + '{}0'.format(condition))
+    s = '{{[{}] : {}}}'.format(indices, ' and '.join(constraints))
+    return BasicSet(s)
+
+
+def ker(f):
+    if type(f) == str:
+        f = BasicMap(f)
+    mat = []
+    for c in f.get_constraints():
+        vars = c.get_var_dict()
+        index_vals = [-1 * int(c.get_coefficient_val(v[0], v[1]).to_str()) for k, v in vars.items() if
+                      v[0] != dim_type.param]
+        mat.append(index_vals)
+    mat = np.array(mat)
+    indices = ','.join(['i{}'.format(i) for i in range(len(mat[0, :]))])
+    constraints = []
+    for c in mat:
+        constraints.append(
+            '+'.join(['{}{}'.format(a[0], a[1]) for a in zip(c, indices.split(','))]) + '=0')
     s = '{{[{}] : {}}}'.format(indices, ' and '.join(constraints))
     return BasicSet(s)
 
@@ -105,29 +140,18 @@ def rho_from_labels(faces, C, labels, fd):
     return rho[0]
 
 
-def recursive_simplify(k=None, op=None, fp_str=None, fd_str=None, node=None, lattice=None, C=None):
+def recursive_simplify(k=None, fp_str=None, fd_str=None, node=None, lattice=None, C=None, legal_labels=None):
     fp = BasicMap(fp_str)
     fd = BasicMap(fd_str)
 
-    print('STEP 3.0 - begin recursive call with:\n')
+    print('STEP 3.0 - recursive call with:\n')
 
     print('node = {}'.format('{}'))
     print('fp = {}'.format(fp_str))
     print('fd = {}'.format(fd_str))
     print()
 
-    print('STEP 3.1 - factorize fp = fp1 * fp2')
-    print('           fp2 dictates which boundaries are strict or weak')
-    print('           for now, let fp1 = identity and fp2 = fp')
-    print('           (TODO)\n')
-
-    indices = ','.join([k for k in fp.get_space().get_var_dict()])
-
-    print('fp1 = {{[{}]->[{}]}}'.format(indices, indices))
-    print('fp2 = {}'.format(fp_str))
-    print()
-
-    print('STEP 3.2 - for each child face in node, label as "weak" or "strict" given fp2\n')
+    print('STEP 3.1 - for each child face in node, label as "weak" or "strict" given fp\n')
     faces = list(lattice.graph.neighbors(node))
     for face in faces:
         face = set(face)
@@ -135,47 +159,26 @@ def recursive_simplify(k=None, op=None, fp_str=None, fd_str=None, node=None, lat
         print(face, label)
     print()
 
-    print('STEP 3.3 - determine the possible face labelings given op\n')
-    legal_labels = ['ADD', 'INV']
-    if inverse(op):
-        legal_labels.append('SUB')
-
-    print('op = {}'.format(op))
-    print('labels = {}'.format(legal_labels))
-    print()
-
-    print('STEP 3.4 - enumerate all label combos from labels and "weak" faces\n')
     candidate_faces = [face for face in faces if not is_strict(face, fp, C)]
+    #candidate_faces = faces
 
-    print('STEP 3.5 - prune out impossible combos & for each possible combo:')
-    print('             - construct space of legal reuse vectors rho')
-    print('             - if this is not empty then use lexmin/lexmax to select a rho')
-    print('           if no possible combo results in success then report failure')
-    print('           apply Theorem 5 to set up residual reductions and recurse\n')
+    print('STEP 3.2 - determine all possible combos\n')
 
     label_combos = list()
+    header = ['{}'.format(set(f)) for f in candidate_faces]
+    print(header)
+    print('-' * len(str(header)))
     for i in range(len(legal_labels) ** len(candidate_faces)):
         labels = [LABEL[int(d_ary(len(legal_labels), i).zfill(len(candidate_faces))[j])] for j in range(len(candidate_faces))]
         rho = rho_from_labels(candidate_faces, C, labels, fd)
         if rho:
             label_combos.append(labels + [rho])
-
-    if label_combos:
-        header = ['{}'.format(set(f)) for f in candidate_faces]
-        print(header)
-        print('-'*len(str(header)))
-        for combo in label_combos:
-            labels, rho = combo[:-1], combo[-1]
-            print('{}  possible ->   rho = {}'.format(labels, rho))
-    else:
-        print('Failed - no possible remaining options')
+            print('{}  possible -> rho = {}'.format(labels, rho))
+        else:
+            print('{}'.format(labels))
     print()
 
-
-
-
-
-
+    print('STEP 3.3 - construct complete possible labeling w/ any strict faces\n')
 
 
 
@@ -185,45 +188,35 @@ def simplify(op=None, fp=None, s=None, fd=None):
     print('STEP 1 - construct the face lattice from context domain of reduction body\n')
     C, lattice, bset, dim_P = face_lattice(s)
 
-    print('STEP 2 - get the root node in lattice and start recursion\n')
-    root = lattice.get_root()
+    print('STEP 2 - set up recursion\n')
 
     # todo add counter for num remaining dims of reuse available
     # not necessarily a need to decompose the dependence function
 
-    recursive_simplify(k=dim_P, op=op, fp_str=fp, fd_str=fd, node=root, lattice=lattice, C=C)
+    legal_labels = ['ADD', 'INV']
+    if inverse(op):
+        legal_labels.append('SUB')
+
+    print('op = {}'.format(op))
+    print('labels = {}'.format(legal_labels))
+    print()
+
+    root = lattice.get_root()
+
+    recursive_simplify(k=dim_P, fp_str=fp, fd_str=fd, node=root, lattice=lattice, C=C, legal_labels=legal_labels)
 
 
-def ex1():
-    # ex1
-    simplify(op='max',
-             fp='{[i,j,k]->[i]}',
-              s='{[i,j,k] : 1<=i<=100 and 1<=j<=i-1 and 1<=k<=i-j }',
-             fd='{[i,j,k]->[k]}')
-
-
-def ex2():
+def ex_manual():
     # ex2 - needs reduction decomposition of fp first
     simplify(op='max',
-             fp='{[i,j,k]->[i]}',
-             s='{[i,j,k] : k>=1 and 0>=i+k-100 and j>=1 and i>=j and 0>=k-100 and 0>=j-100 and i>=1 and 0>=i-99}',
+             fp='{[i,j,k]->[i,k]}',
+             s='{[i,j,k] : j>=1 and i>=j and k>=1 and 0>=i+k-100 and 0>=k-100 and 0>=j-100 and 0>=i-99 and i>=1}',
              fd='{[i,j,k]->[j,k]}')
-
-
-def ex3():
-    # ex3 - needs reduction decomposition with not-so-obvious factorization of fp
-    simplify(op='+',
-             #fp='{[i,j,k]->[i,j+k]}',
-             fp='{[i,j,k]->[i]}',
-             s='{[i,j,k] : j>=i and 2i>=j and k>=i and 3i>=j+k and j>=1 and k>=1 and 0>=j-100 and 0>=k-100 and 0>=i-100 and i>=1}',
-             fd='{[i,j,k]->[j,k]}')
-
 
 
 if __name__ == '__main__':
-    #ex1()
-    #ex2()
-    ex3()
+    ex_manual()
+
 
 
 
