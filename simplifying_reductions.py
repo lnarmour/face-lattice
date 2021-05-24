@@ -362,10 +362,10 @@ def ex_manual():
     fd = '{[i,j,k]->[j,k]}'
 
     # ex1
-    op = 'max'
-    fp = '{[i,j,k]->[i]}'
-    s = '{[i,j,k] : j>=1 and i>=j+1 and k>=1 and i>=j+k and 0>=k-100 and i>=2 and 0>=i-100}'
-    fd = '{[i,j,k]->[k]}'
+    #op = 'max'
+    #fp = '{[i,j,k]->[i]}'
+    #s = '{[i,j,k] : j>=1 and i>=j+1 and k>=1 and i>=j+k and 0>=k-100 and i>=2 and 0>=i-100}'
+    #fd = '{[i,j,k]->[k]}'
 
 
     legal_labels = ['ADD', 'INV']
