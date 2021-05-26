@@ -173,7 +173,7 @@ def rho_from_labels(faces, parent, Lp, C, labels, fd):
     if rho:
         return rho[0]
     else:
-        print('----WARN')
+        print('----WARN - there may be a valid rho, but not accessible by lexmin/lexmax')
         return None
 
 
