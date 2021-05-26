@@ -121,14 +121,9 @@ def d_ary(d, n):
         nums.append(str(r))
     return ''.join(reversed(nums))
 
-LABEL = {
-    0: 'ADD',
-    1: 'INV',
-    2: 'SUB'
-}
-
 
 def enumerate_labels(facets, labels):
+    LABEL = {i:labels[i] for i in range(len(labels))}
     num_labels = len(labels)
     num_facets = len(facets)
     for i in range(num_labels ** num_facets):
@@ -175,7 +170,11 @@ def rho_from_labels(faces, parent, Lp, C, labels, fd):
             if rho:
                 break
 
-    return rho[0]
+    if rho:
+        return rho[0]
+    else:
+        print('----WARN')
+        return None
 
 
 def prune_combos(label_combos):
@@ -234,15 +233,63 @@ def get_Lp(node, C):
     return Lp
 
 
-def simplify(k=None, fp_str=None, fd_str=None, node=None, lattice=None, C=None, legal_labels=None, rho=None):
+# dirty way to make the function look nice for 3D
+# I don't want/need to implement a pretty printer
+def clean(f):
+    ret = f.replace('i0', 'i').replace('i1', 'j').replace('i2', 'k')
+    ret = ret.replace('1', '')
+    ret = ret.replace('+-', '-')
+    ret = ret.replace('0i', '').replace('0j', '').replace('0k', '')
+    ret = ret.replace('++', '+')
+    ret = ret.replace('[+', '[')
+    ret = ret.replace('+]', ']')
+    ret = ret.replace(',+', ',')
+    ret = ret.replace('+,', ',')
+    return ret
+
+
+def decompose_projection(combo, facets, parent, C):
+    bsets = []
+    for label,facet in zip(combo,facets):
+        if label != 'B':
+            continue
+        bsets.append(ker_from_facet_normal(facet, parent, C))
+
+    if not bsets:
+        return None
+
+    ker_fp1 = reduce(lambda s0, s1: s0.intersect(s1), bsets)
+    # construct fp1 from ker_fp1 equality constraints
+    ker_fp1_C, _ = make_constraints_matrix(ker_fp1, for_polylib=False)
+    fp1 = '{{{{[{}]->[{{}}]}}}}'.format(','.join(['i{}'.format(i) for i in range(C.shape[1] - 1)]))
+    pieces = []
+    for c in ker_fp1_C[:-1,:-1]:
+        indices = ','.join(['i{}'.format(i) for i in range(len(c))])
+        pieces.append('+'.join(['{}{}'.format(a[0], a[1]) for a in zip(c, indices.split(','))]))
+
+    rhs = ','.join(pieces)
+    fp1 = fp1.format(rhs)
+    return clean(fp1)
+
+
+def add_exploration_to_lattice(fp, node, lattice):
+    if node not in lattice.explored:
+        lattice.explored[node] = set()
+    lattice.explored[node].add(fp)
+
+
+def simplify(k=None, fp_str=None, fd_str=None, node=None, lattice=None, C=None, legal_labels=None, path=''):
     def pprint(*args, **kwargs):
         print('@{} '.format(set(node) if node else '{}'), end='')
         print(*args, **kwargs)
+
+    successful_combos = []
 
     pprint('STEP A.1 - if k==0 return else continue. k={}'.format(k))
     if k == 0:
         pprint()
         pprint('Success - reached bottom, no more available dimensions of reuse.')
+        pprint('PATH: {}'.format(path))
         pprint()
         return True
     pprint()
@@ -284,63 +331,58 @@ def simplify(k=None, fp_str=None, fd_str=None, node=None, lattice=None, C=None, 
         else:
             pprint('{}  impossible'.format(labels))
     pprint()
-    if not label_combos:
-        pprint('FAILURE - no possible combos')
-        return False
 
-    pprint('STEP A.5 - prune out redundant possible combos')
-    pprint()
-    pprint(header)
-    pprint('-' * len(str(header)))
-    unique_label_combos = prune_combos(label_combos)
-    for combo in unique_label_combos:
-        labels,rho = combo[:-1],combo[-1]
-        pprint('{}  -> rho = {}'.format(labels, rho))
-    pprint()
-
-    pprint('STEP A.6 - incorporate boundary facets')
-    pprint()
-    boundary_facets = [f for f in facets if f not in candidate_facets]
-    header = '{} {}'.format(header, [str(set(bf)) for bf in boundary_facets])
-    pprint(header)
-    pprint('-' * len(str(header)))
-    full_label_combos = []
-    for combo in unique_label_combos:
-        labels,rho = combo[:-1],combo[-1]
-        boundary_labels = []
-        full_label_combo = deepcopy(labels)
-        for boundary_facet in boundary_facets:
-            bl = boundary_label(boundary_facet, node, C, rho)
-            boundary_labels.append(bl)
-            full_label_combo.append(bl)
-            pprint('{} {}  -> rho = {}'.format(labels, boundary_labels, rho))
-        full_label_combo.append(rho)
-        full_label_combos.append(full_label_combo)
-    pprint()
-
-    pprint('STEP A.7 - recurse into "ADD" and "inward" boundary facets')
-    pprint()
-    successful_combos = []
-    for combo in full_label_combos:
-        labels,rho = combo[:-1],combo[-1]
-        abort = None
-        for label,facet in zip(labels,candidate_facets + boundary_facets):
-            if label != 'ADD' and label != 'inward':
-                continue
-            pprint('recursing into {} facet'.format(set(facet)))
-            pprint()
-            ret = simplify(k=k-1, fp_str=fp_str, fd_str=fd_str, node=facet, lattice=lattice, C=C, legal_labels=legal_labels)
-            abort = not ret
-            if abort:
-                break
-            # TODO - figure out how to propagate the success back up the recusion
-            # TODO - likely, attach to the face lattice accordingly
-        if not abort:
-            successful_combos.append(combo)
+    if label_combos:
+        pprint('STEP A.5 - prune out redundant possible combos')
         pprint()
-    if len(successful_combos) == 0:
-        pprint('FAILURE - no successful combos')
-    pprint()
+        pprint(header)
+        pprint('-' * len(str(header)))
+        unique_label_combos = prune_combos(label_combos)
+        for combo in unique_label_combos:
+            labels,rho = combo[:-1],combo[-1]
+            pprint('{}  -> rho = {}'.format(labels, rho))
+        pprint()
+
+        pprint('STEP A.6 - incorporate boundary facets')
+        pprint()
+        boundary_facets = [f for f in facets if f not in candidate_facets]
+        header = '{} {}'.format(header, [str(set(bf)) for bf in boundary_facets])
+        pprint(header)
+        pprint('-' * len(str(header)))
+        full_label_combos = []
+        for combo in unique_label_combos:
+            labels,rho = combo[:-1],combo[-1]
+            boundary_labels = []
+            full_label_combo = deepcopy(labels)
+            for boundary_facet in boundary_facets:
+                bl = boundary_label(boundary_facet, node, C, rho)
+                boundary_labels.append(bl)
+                full_label_combo.append(bl)
+                pprint('{} {}  -> rho = {}'.format(labels, boundary_labels, rho))
+            full_label_combo.append(rho)
+            full_label_combos.append(full_label_combo)
+        pprint()
+
+        pprint('STEP A.7 - recurse into "ADD" and "inward" boundary facets')
+        pprint()
+        for combo in full_label_combos:
+            labels,rho = combo[:-1],combo[-1]
+            abort = None
+            for label,facet in zip(labels,candidate_facets + boundary_facets):
+                if label != 'ADD' and label != 'inward':
+                    continue
+                pprint('recursing into {} facet'.format(set(facet)))
+                pprint()
+                ret = simplify(k=k-1, fp_str=fp_str, fd_str=fd_str, node=facet, lattice=lattice, C=C, legal_labels=legal_labels, path='{}, ({}, {}, {})'.format(path, node, fp_str, rho))
+                abort = not ret
+                if abort:
+                    break
+                # TODO - figure out how to propagate the success back up the recusion
+                # TODO - likely, attach to the face lattice accordingly
+            if not abort:
+                successful_combos.append(combo)
+            pprint()
+        pprint()
 
     pprint('STEP B - todo...')
     pprint()
@@ -351,6 +393,29 @@ def simplify(k=None, fp_str=None, fd_str=None, node=None, lattice=None, C=None, 
     # TODO - figure out how to do the decomposition
     # TODO - i.e., how to navigate the infinite space of decompositions
 
+    possible_combos = []
+    for combo in enumerate_labels(facets, ['-', 'B']):
+        # fp = fp2*fp1
+        fp1 = decompose_projection(combo, facets, node, C)
+        if fp1:
+            if node in lattice.explored and fp1 in lattice.explored[node]:
+                pprint('{} already explored'.format(combo))
+            elif fp1:
+                add_exploration_to_lattice(fp1, node, lattice)
+                pprint('{} possible -> fp1 = {}'.format(combo, fp1))
+                possible_combos.append((combo, fp1))
+        else:
+            pprint('{} impossible'.format(combo))
+    pprint()
+
+    for combo, fp1 in possible_combos:
+        ret = simplify(k=k, fp_str=fp1, fd_str=fd_str, node=node, lattice=lattice, C=C, legal_labels=legal_labels, path='{}, ({}, {}, {})'.format(path, node, fp1, None))
+        if ret:
+            successful_combos.append(ret)
+
+    if len(successful_combos) == 0:
+        pprint('FAILURE - no successful combos')
+        return None
     return successful_combos
 
 
@@ -360,12 +425,14 @@ def ex_manual():
     fp = '{[i,j,k]->[i]}'
     s = '{[i,j,k] : j>=1 and i>=j and k>=1 and 0>=i+k-100 and 0>=k-100 and 0>=j-100 and 0>=i-99 and i>=1}'
     fd = '{[i,j,k]->[j,k]}'
+    k = 1
 
     # ex1
     #op = 'max'
     #fp = '{[i,j,k]->[i]}'
     #s = '{[i,j,k] : j>=1 and i>=j+1 and k>=1 and i>=j+k and 0>=k-100 and i>=2 and 0>=i-100}'
     #fd = '{[i,j,k]->[k]}'
+    #k = 2
 
 
     legal_labels = ['ADD', 'INV']
@@ -376,7 +443,7 @@ def ex_manual():
     root = lattice.get_root()
     node = root
 
-    simplify(k=2, fp_str=fp, fd_str=fd, node=node, lattice=lattice, C=C, legal_labels=legal_labels)
+    simplify(k=k, fp_str=fp, fd_str=fd, node=node, lattice=lattice, C=C, legal_labels=legal_labels)
 
 
 if __name__ == '__main__':

@@ -49,7 +49,7 @@ def make_incidence_matrix(C, R):
     return I
 
 
-def make_constraints_matrix(bset):
+def make_constraints_matrix(bset, for_polylib=True):
     C = []
     for c in bset.get_constraints():
         vars = c.get_var_dict()
@@ -58,17 +58,25 @@ def make_constraints_matrix(bset):
         param_vals = [int(c.get_coefficient_val(v[0], v[1]).to_str()) for k, v in vars.items() if
                       v[0] == dim_type.param]
         const_val = [int(c.get_constant_val().to_str())]
+
         polylib_prefix = [0] if c.is_equality() else [1]
         C.append(polylib_prefix + index_vals + param_vals + const_val)
+
 
     C.append([0] * (1 + len(index_vals) + len(param_vals)) + [1])
     C = np.array(C)
 
     where_inequality = C[:,0] == 1
     index_param_space = C[where_inequality][:,1:-1]
-    dim_P = np.linalg.matrix_rank(index_param_space)
+    if len(index_param_space) > 0:
+        dim_P = np.linalg.matrix_rank(index_param_space)
+    else:
+        dim_P = np.linalg.matrix_rank(C)
 
-    return C, dim_P
+    if for_polylib:
+        return C, dim_P
+    else:
+        return C[:,1:], dim_P
 
 
 def get_num_params_indices(bset):
@@ -186,6 +194,7 @@ class FaceLattice:
 
     def __init__(self, lattice):
         self.graph = nx.DiGraph()
+        self.explored = dict()
 
         Ks = [k for k in lattice]
         root = frozenset(lattice[Ks[0]][0])
